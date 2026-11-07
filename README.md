@@ -31,9 +31,10 @@ python -m http.server 8080 --bind 127.0.0.1
 
 ## Deploy (Vercel)
 
-1. Import the GitHub repo into Vercel.
-2. Set **Root Directory** to `site`, Framework Preset to **Other**, and leave the build command empty.
-3. Deploy. `site/vercel.json` adds caching and security headers.
+1. Import the GitHub repo into Vercel and keep the default Root Directory (the repo root).
+2. Deploy. The root `vercel.json` publishes the `site/` folder (no build needed) and adds caching and security headers.
+
+If the project's Root Directory is set to `site` instead, `site/vercel.json` applies, and that works too.
 
 Photos are not in the repo, because there are ≈28k files and a Vercel deployment allows far fewer. Every photo URL goes
 through one base URL (`IMG_BASE` in `site/app.js`):
