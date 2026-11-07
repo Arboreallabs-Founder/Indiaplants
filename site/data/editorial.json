@@ -1,0 +1,20 @@
+{
+  "_note": "Hand-curated presentation layer. Plant records stay canonical in plants.json; captions below are edited from each record's own description/tips. Focus = CSS object-position.",
+  "spread": [
+    { "id": 2656, "role": "lead", "focus": "50% 60%", "caption": "Rimmed leaves can reach 6 ft across. The night-blooming flowers open white, then turn pink the next day." },
+    { "id": 1491, "role": "side", "focus": "50% 30%", "caption": "An upright gum arabic tree, native to India. The jet-black bark exudes edible gum arabic." },
+    { "id": 1630, "role": "side", "focus": "50% 45%", "caption": "Terrestrial lady slipper orchids from Asia; many other varieties are found in India." }
+  ],
+  "categories": {
+    "Trees": 1491, "Palms and Cycads": 1698, "Orchids": 1618, "Bromeliads": 122, "Flowering Pot Plants": 633,
+    "Water & Aquatic Plants": 2645, "Cacti & Succulents": 141, "Climbers, Creepers & Vines": 304,
+    "Indoor Plants": 1334, "Shrubs": 2007
+  },
+  "collection": {
+    "title": "Native to India",
+    "trait": "Indigenous (native to India)",
+    "intro": "Plants the records mark as indigenous, chosen from the best-photographed entries.",
+    "ids": [2533]
+  },
+  "specimen": { "id": 445, "focus": "50% 45%" }
+}

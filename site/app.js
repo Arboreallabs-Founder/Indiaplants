@@ -1,8 +1,7 @@
 // Indiaplants — client app
 // Routes: #/  #/plants?…  #/categories  #/plant/:id  #/about  #/list  #/shop?cat=  #/shop/:id  #/cart
-import { icon, hydrateIcons } from './icons.js?v=26';
-import { submitSignup } from './crm.js?v=26';
-import { mountFilm } from './film.js?v=26';
+import { icon, hydrateIcons } from './icons.js?v=30';
+import { submitSignup } from './crm.js?v=30';
 
 const app = document.getElementById('app');
 const PAGE = 60;
@@ -13,6 +12,7 @@ const MONTHS = /^(January|February|March|April|May|June|July|August|September|Oc
 
 let PLANTS = [], BY_ID = new Map(), CATS = [], CAT_COUNT = new Map();
 let SHOP = [], SHOP_BY_ID = new Map(), SHOP_CATS = [];
+let EDIT = {};
 let teardown = null; // cleanup for the current view (e.g. the flytrap loop)
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -118,7 +118,8 @@ const NAME_FIX = { 'Tarracotta pots': 'Terracotta pots', 'Planters stone': 'Ston
 const SHOP_ICON = { 'Pots': 'pot', 'Garden furniture': 'bench', 'Shade nets & weed mats': 'net', 'Coir sticks': 'stick', 'Decorative stones': 'stone', 'Flower arranging': 'vase', 'Planters': 'pot', 'Hanging baskets': 'basket', 'Memberships': 'badge' };
 
 async function load() {
-  const [pr, sr] = await Promise.all([fetch('data/plants.json'), fetch('data/shop.json')]);
+  const [pr, sr, er] = await Promise.all([fetch('data/plants.json'), fetch('data/shop.json'), fetch('data/editorial.json').catch(() => null)]);
+  EDIT = er && er.ok ? await er.json() : {};
   if (!pr.ok) throw new Error(pr.status);
   PLANTS = await pr.json();
   SHOP = sr.ok ? await sr.json() : [];
@@ -149,6 +150,7 @@ async function load() {
     c.photos = inCat.reduce((n, p) => n + p.g.length + (p.img ? 1 : 0), 0);
   }
   CATS.sort((a, b) => b.count - a.count);
+  for (const c of CATS) { const id = EDIT.categories?.[c.name]; const p = id && BY_ID.get(String(id)); if (p?.img) c.img = p.img; }
 
   for (const s of SHOP) {
     s.cat = CAT_FIX[s.cat] || s.cat;
@@ -299,15 +301,13 @@ function href(params, base = '#/plants') {
 const go = params => (location.hash = href(params));
 
 /* ---------- Home ---------- */
-const NOTCH = up => `<div class="notch ${up ? 'notch--up' : ''}" aria-hidden="true"><span></span><svg viewBox="0 0 720 22" preserveAspectRatio="none"><path d="M0,0 H720 C700,0 694,22 672,22 H48 C26,22 20,0 0,0 Z"/></svg><span></span></div>`;
-
 const PICK = {
   sun: [['full', 'Full sun', 'sun', { light: ['Sun growing'] }], ['part', 'Part shade', 'form', { light: ['Semi shade'] }], ['shade', 'Shade', 'shade', { light: ['Shade growing', 'Low light tolerant'] }]],
   water: [['little', 'A little', 'dropLow', { water: ['Requires less', 'Can tolerate less'] }], ['normal', 'Normal', 'drop', { water: ['Normal'] }], ['plenty', 'Plenty', 'wave', { water: ['Requires more', 'Can tolerate more'] }]],
   space: [['pot', 'Pot', 'pot', { h: ['Less than 50 cms', '50 cms to 100 cms'] }, 'under 1 m'], ['bed', 'Bed', 'small', { h: ['1 to 2 meters'] }, '1–2 m'], ['garden', 'Garden', 'leaf', { h: ['2 to 4 meters', '4 to 6 meters'] }, '2–6 m'], ['large', 'Large', 'family', { h: ['6 to 8 meters', '8 to 12 meters', 'More than 12 meters'] }, '6 m+']],
   extra: [['flowers', 'Flowers', 'flower', { for: ['Flowers'] }], ['fragrant', 'Fragrant', 'wind', { sp: ['Fragrant flowers or leaves'] }], ['butterflies', 'Butterflies', 'butterfly', { sp: ['Attracts butterflies'] }], ['native', 'Native to India', 'pin', { sp: ['Indigenous (native to India)'] }], ['coastal', 'Coastal', 'wave', { sp: ['Good on seaside'] }], ['animal', 'Animal proof', 'shield', { sp: ['Animals will not eat'] }]],
 };
-const PICK_Q = [['sun', '01', 'How much sun does the spot get?'], ['water', '02', 'How much will you water?'], ['space', '03', 'How much room is there?'], ['extra', '04', 'Anything else?', 'optional']];
+const PICK_Q = [['sun', 'How much sun does the spot get?'], ['water', 'How much will you water?'], ['space', 'How much room is there?'], ['extra', 'Anything else?', 'optional']];
 
 function pickerQuery(sel) {
   const q = {};
@@ -318,190 +318,220 @@ function pickerQuery(sel) {
   return q;
 }
 const matchQuery = q => PLANTS.filter(p => Object.entries(q).every(([k, vals]) => vals.some(v => getF(k)(p).includes(v))));
+// Why a plant matched, in its own recorded values (no claims beyond the record)
+function matchReason(p, q) {
+  const bits = [];
+  if (q.light) bits.push(p.light.filter(v => q.light.includes(v)).map(v => v.replace(' growing', '')).join(', '));
+  if (q.water) bits.push(p.water.filter(v => q.water.includes(v)).join(', ') + ' water');
+  if (q.h) bits.push(short(p.h));
+  for (const k of ['for', 'sp']) if (q[k]) bits.push(getF(k)(p).filter(v => q[k].includes(v)).join(', '));
+  return bits.filter(Boolean).join(' · ');
+}
 
-function viewHome() {
-  setNav('');
-  const N = PLANTS.length;
-  const photos = PLANTS.reduce((n, p) => n + p.g.length + (p.img ? 1 : 0), 0);
-  const fams = new Set(PLANTS.map(p => p.fam).filter(Boolean)).size;
-  const hero = PLANTS.find(p => p.n === 'Monstera deliciosa') || PLANTS.find(p => p.img);
-  const wall = seeded(PLANTS.filter(p => p.g[0]?.t || p.img), 600, 7).map(p => p.g[0]?.t || p.img);
-  const featured = seeded(PLANTS.filter(p => p.img && p.g.length >= 6), 14, daySeed() + 3);
-  const callouts = [
-    ['01 · Light', hero.light.map(l => l.replace(' growing', '')).join(', '), 'Bright filtered light indoors', .3, .3],
-    ['02 · Water', hero.water.join(', '), 'Keep evenly moist', .7, .26],
-    ['03 · Height', short(hero.h), hero.formL?.[0] || 'Climber on support', .22, .62],
-    ['04 · Family', (hero.fam || '').split(' or ')[0], `${CAT_COUNT.get(hero.primary) || ''} ${hero.primary}`.trim(), .78, .56],
-    ['05 · Flowering', hero.seasonL[0] || 'Inconspicuous', hero.months.length ? hero.months.join(', ') : '', .36, .86],
-    ['06 · Supply', hero.avail || 'On request', 'From Tukai Exotics, Pune', .66, .84],
+const HERO_H1 = () => `A grower’s guide<br>to plants in ${INDIA('India')}.`;
+const HERO_P = n => `${nf.format(n)} ornamental plant records with care notes and photographs, kept by the growers at Tukai Exotics, Pune.`;
+const HERO_ACTIONS = `<div class="hero-actions">
+    <a class="btn btn--primary btn--lg" href="#/plants">${icon('list', 15)}Explore plants</a>
+    <button type="button" class="link link--light" data-jump="picker">Find plants for my space ${icon('arrow', 14)}</button>
+  </div>`;
+
+function specimenFacts(p) {
+  return [
+    ['Light', p.light.map(l => l.replace(' growing', '')).join(', '), ''],
+    ['Water', p.water.join(', '), ''],
+    ['Mature height, as recorded', short(p.h), p.formL?.[0] || ''],
   ];
-  const SUPPLY = [['store', 'Nurseries & garden shops'], ['city', 'Landscape architects'], ['badge', 'Hotels & resorts'], ['box', 'Corporate campuses'], ['pin', 'City planners'], ['form', 'Interior designers'], ['fence', 'Builders & contractors'], ['note', 'Horticulture colleges'], ['family', 'Government departments'], ['sprout', 'Home gardeners']];
+}
 
-  app.innerHTML = `<div>
-  <section class="film" id="film" aria-label="Introduction">
+function heroPicture(p, cls) {
+  return `<picture>
+    <source media="(max-width: 760px)" srcset="assets/hero/monstera-hero-mobile.jpg">
+    <img class="${cls}" src="assets/hero/monstera-hero.jpg" alt="${esc(p.n)}, ${esc(commonOf(p))}, in a green pot" fetchpriority="high" onerror="this.onerror=null;this.parentNode.querySelector('source')?.remove();this.src='${esc(p.img)}'">
+  </picture>`;
+}
+
+// Static opening: phones, reduced motion, no WebGL, or if the 3D film fails to load.
+function introMarkup(p, N) {
+  return `<section class="intro bleed" id="intro" aria-label="Introduction">
+    <div class="intro__media">${heroPicture(p, 'intro__photo')}</div>
+    <div class="intro__copy">
+      <h1>${HERO_H1()}</h1>
+      <p>${HERO_P(N)}</p>
+      ${HERO_ACTIONS}
+    </div>
+  </section>
+  <div class="specimen-strip">
+    <p class="specimen-strip__name"><a href="#/plant/${p.id}"><span class="bot">${esc(p.n)}</span> · ${esc(commonOf(p))}</a></p>
+    <dl>${specimenFacts(p).map(([k, v, s]) => `<div><dt>${k}</dt><dd>${esc(v)}${s ? `<small>${esc(s)}</small>` : ''}</dd></div>`).join('')}</dl>
+    <a class="link" href="#/plant/${p.id}">Full record ${icon('arrow', 14)}</a>
+  </div>`;
+}
+
+function filmMarkup(p, N) {
+  return `<section class="film bleed" id="film" aria-label="Introduction">
     <div class="film__stage">
       <div class="film__wall" aria-hidden="true"></div>
       <canvas class="film__gl" aria-hidden="true"></canvas>
-      <div class="film__card">
-        <picture>
-          <source media="(max-width: 760px)" srcset="assets/hero/monstera-hero-mobile.jpg">
-          <img class="film__photo" src="assets/hero/monstera-hero.jpg" alt="${esc(hero.n)}, ${esc(commonOf(hero))}" onerror="this.onerror=null;this.parentNode.querySelector('source')?.remove();this.src='${esc(hero.img)}'">
-        </picture>
-      </div>
-      <div class="film__scan" aria-hidden="true"></div>
+      <div class="film__card">${heroPicture(p, 'film__photo')}</div>
       <svg class="film__lines" aria-hidden="true"></svg>
-      <ul class="film__callouts" aria-label="${esc(hero.n)} at a glance">
-        ${callouts.map(([k, v, s, ax, ay]) => `<li class="film__callout" data-ax="${ax}" data-ay="${ay}"><span class="mono">${k}</span><b>${esc(v)}</b>${s ? `<small>${esc(s)}</small>` : ''}</li>`).join('')}
+      <ul class="film__callouts" aria-label="${esc(p.n)} at a glance">
+        ${specimenFacts(p).map(([k, v, s], i) => `<li class="film__callout" data-anchor="${['light', 'water', 'height'][i]}"><a href="#/plant/${p.id}"><span class="label">${k}</span><b>${esc(v)}</b>${s ? `<small>${esc(s)}</small>` : ''}</a></li>`).join('')}
       </ul>
       <div class="film__copy">
-        <div class="film__act">
-          <span class="mono">Indiaplants · Pune · since 1975</span>
-          <h1>Every plant you can grow in ${INDIA('India')}.</h1>
-          <p>Care data and photographs for ${nf.format(N)} ornamental plants, written by the growers at Tukai Exotics.</p>
+        <div class="film__act is-on">
+          <h1>${HERO_H1()}</h1>
+          <p>${HERO_P(N)}</p>
+          ${HERO_ACTIONS}
         </div>
-        <div class="film__act film__act--b">
-          <span class="mono">${esc(hero.n)} · ${esc(commonOf(hero))}</span>
-          <h2>Every plant, documented.</h2>
-          <p>Light, water, size, flowering and supply for each one — not copied, recorded by the people who propagate them.</p>
+        <div class="film__act film__act--b" inert>
+          <h2>Recorded by the people who grow it.</h2>
+          <p><a class="link link--light" href="#/plant/${p.id}"><span class="bot">${esc(p.n)}</span> · ${esc(commonOf(p))}: full record ${icon('arrow', 14)}</a></p>
         </div>
-        <div class="film__act film__act--c">
-          <span class="mono">One of ${nf.format(N)}</span>
-          <h2><span class="count" id="filmCount">1</span> plants. One search.</h2>
+        <div class="film__act film__act--c" inert>
+          <h2><span class="count" id="filmCount">1</span> plant records.</h2>
           <form class="film__search" id="heroSearch" role="search" autocomplete="off">
             <label class="field">${icon('search', 16)}<input name="q" type="search" placeholder="Botanical, common or regional name" aria-label="Search plants"></label>
             <button class="btn btn--primary" type="submit">${icon('arrow', 14)}Search</button>
           </form>
         </div>
       </div>
-      <ol class="film__steps" aria-label="Sections">
-        <li class="film__step mono">Plant</li><li class="film__step mono">Data</li><li class="film__step mono">Library</li>
-      </ol>
-      <div class="film__hint mono" aria-hidden="true">${icon('down', 12)}Scroll</div>
+      <div class="film__hint" aria-hidden="true">${icon('down', 12)}Scroll</div>
+    </div>
+  </section>`;
+}
+
+function viewHome() {
+  setNav('');
+  const N = PLANTS.length;
+  const photos = PLANTS.reduce((n, p) => n + p.g.length + (p.img ? 1 : 0), 0);
+  const fams = new Set(PLANTS.map(p => p.fam).filter(Boolean)).size;
+  const spec = BY_ID.get(String(EDIT.specimen?.id || 445)) || PLANTS.find(p => p.img);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const webgl = (() => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } })();
+  const useFilm = !reduce && webgl && innerWidth > 760 && !/[?&]static/.test(location.search);   // ?static previews the fallback
+
+  const spread = (EDIT.spread || []).map(e => ({ ...e, p: BY_ID.get(String(e.id)) })).filter(e => e.p);
+  const fig = (e, lead) => `<figure class="ed ${lead ? 'ed--lead' : ''}">
+      <a class="ed__img" href="#/plant/${e.p.id}" tabindex="-1" aria-hidden="true">${img(e.p.img, '', `style="object-position:${e.focus || '50% 50%'}"`)}</a>
+      <figcaption><a href="#/plant/${e.p.id}" class="bot">${esc(e.p.n)}</a><span class="ed__common">${esc(commonOf(e.p))}</span><p>${esc(e.caption)}</p></figcaption>
+    </figure>`;
+  const col = EDIT.collection || {};
+  const natives = [...(col.ids || []).map(id => BY_ID.get(String(id))).filter(Boolean),
+    ...PLANTS.filter(p => p.img && p.sp.includes(col.trait) && !(col.ids || []).includes(+p.id) && !spread.some(e => e.p === p)).sort((a, b) => b.g.length - a.g.length)]
+    .slice(0, 6);
+  const timeline = [['1975', 'Ramrao Jagtap turns his rose garden in Pune into a full-time nursery.'], ['1998', 'Tukai Exotics starts on a five-acre farm at Loni Kalbhor.'], ['2002', 'The Tukai Exotics Plant CD-ROM documents the range for the first time.'], ['Today', `${nf.format(N)} plant records online.`]];
+
+  app.innerHTML = `<div>
+  ${useFilm ? filmMarkup(spec, N) : introMarkup(spec, N)}
+  <p class="provenance">${nf.format(N)} records · ${nf.format(photos)} photographs · ${CATS.length} categories · ${fams} botanical families · compiled by Tukai Exotics since the 2002 Plant CD-ROM</p>
+
+  <section class="section discover" aria-labelledby="discoverTitle">
+    <div class="discover__head">
+      <h2 id="discoverTitle">Browse the collection</h2>
+      <p>From giant water lilies to native trees, every record can be searched by name, growing condition and use.</p>
+    </div>
+    <div class="discover__grid">
+      ${spread[0] ? fig(spread[0], true) : ''}
+      <div class="discover__side">${spread.slice(1, 3).map(e => fig(e, false)).join('')}</div>
+      <nav class="discover__cats" aria-label="Categories">
+        <h3>Categories</h3>
+        <ul>${CATS.slice(0, 12).map(c => `<li><a href="${href({ cat: c.name })}"><span>${esc(c.name)}</span><span class="num">${nf.format(c.count)}</span></a></li>`).join('')}</ul>
+        <a class="link" href="#/categories">All ${CATS.length} categories ${icon('arrow', 14)}</a>
+        <a class="btn btn--primary" href="#/plants">${icon('list', 14)}Browse all ${nf.format(N)} plants</a>
+      </nav>
     </div>
   </section>
-  ${NOTCH(false)}
 
-  <div class="facts-strip" role="list">
-    <div role="listitem">${icon('sprout', 18)}<b class="num">${nf.format(N)}</b><span>plant records</span></div>
-    <div role="listitem">${icon('camera', 18)}<b class="num">${nf.format(photos)}</b><span>photographs</span></div>
-    <div role="listitem">${icon('grid', 18)}<b class="num">${CATS.length}</b><span>categories</span></div>
-    <div role="listitem">${icon('family', 18)}<b class="num">${fams}</b><span>botanical families</span></div>
-  </div>
-
-  <section class="section">
-    <div class="section__head">
-      <div><span class="mono muted">01 — Browse</span><h2 style="margin-top:6px">Start with a category</h2><p>Plants appear in every category they suit, so totals overlap.</p></div>
-      <a class="link" href="#/categories">All ${CATS.length} with data ${icon('arrow', 14)}</a>
-    </div>
-    <div class="bento" id="bento">${CATS.map(c => `<a class="tile" href="${href({ cat: c.name })}">${img(c.img, '')}<span class="tile__label"><strong>${esc(c.name)}</strong><span class="num">${nf.format(c.count)}${icon('arrow', 12)}</span></span></a>`).join('')}</div>
-  </section>
-
-  <section class="section" style="margin-bottom:clamp(44px,6vw,72px)">
-    <div class="section__head"><div><span class="mono muted">02 — Trade</span><h2 style="margin-top:6px">Who the nursery supplies</h2><p>Tukai Exotics is a wholesale grower across 70 acres; retail is through The Enchanted Gardens.</p></div><a class="link" href="#/about">About the growers ${icon('arrow', 14)}</a></div>
-    <div class="supply">${SUPPLY.map(([ic, t]) => `<div>${icon(ic, 18)}${t}</div>`).join('')}</div>
-  </section>
-
-  ${NOTCH(true)}
-  <section class="band" id="picker" aria-labelledby="pickerTitle">
+  <section class="band bleed" id="picker" aria-labelledby="pickerTitle">
     <div class="picker">
       <div>
         <div class="picker__head">
-          <span class="mono">03 — Plant picker</span>
           <h2 id="pickerTitle">What should I plant here?</h2>
-          <p>Answer three questions about the spot. The count updates from all ${nf.format(N)} records as you choose.</p>
+          <p>Describe the spot and see plants whose records match. Matching a record isn’t a guarantee for your exact conditions, so check each plant’s notes.</p>
         </div>
-        ${PICK_Q.map(([g, n, label, opt]) => `<div class="q" role="group" aria-labelledby="q-${g}">
-          <div class="q__label"><span class="mono">${n}</span><strong id="q-${g}">${label}</strong>${opt ? `<em>${opt}</em>` : ''}</div>
+        ${PICK_Q.map(([g, label, opt]) => `<div class="q" role="group" aria-labelledby="q-${g}">
+          <div class="q__label"><strong id="q-${g}">${label}</strong>${opt ? `<em>${opt}</em>` : ''}</div>
           <div class="choices">${PICK[g].map(([id, t, ic, , hint]) => `<button type="button" class="choice" data-g="${g}" data-v="${id}">${icon(ic, 14)}${t}${hint ? ` <small>${hint}</small>` : ''}</button>`).join('')}</div>
         </div>`).join('')}
       </div>
-      <aside class="result" aria-live="polite" id="pickResult"></aside>
+      <aside class="result" id="pickResult" aria-label="Matching plants"></aside>
+      <span class="sr" aria-live="polite" id="pickLive"></span>
     </div>
   </section>
-  ${NOTCH(false)}
 
-  <section class="section" style="margin-bottom:clamp(44px,6vw,72px)">
-    <div class="section__head"><div><span class="mono muted">04 — Today</span><h2 style="margin-top:6px">Today's selection</h2><p>Well-photographed plants, changed daily.</p></div><a class="link" href="#/plants?sort=photos">Most photographed ${icon('arrow', 14)}</a></div>
-    <div class="rail">${featured.map(plantCard).join('')}</div>
+  <section class="section story" aria-labelledby="storyTitle">
+    <div class="story__text">
+      <h2 id="storyTitle">Written by growers, not compilers</h2>
+      <p>The Jagtap family has grown plants in Pune since 1975. Their wholesale nursery, Tukai Exotics, produces the plants in these records on its own farms and supplies nurseries, landscape architects, hotels and corporate clients.</p>
+      <a class="link" href="#/about">The family’s story ${icon('arrow', 14)}</a>
+    </div>
+    <ol class="timeline" aria-label="Milestones">${timeline.map(([y, t]) => `<li><b>${y}</b><span>${esc(t)}</span></li>`).join('')}</ol>
   </section>
 
-  ${NOTCH(true)}
-  <section class="band story-band">
-    <div class="story-strip" style="background:none;padding:0">
-      <div><span class="mono" style="color:var(--green-mid)">05 — Growers</span><h2 style="margin-top:8px">Written by growers, not compilers</h2></div>
-      <div>
-        <p>The Jagtap family has grown plants in Pune since 1975. Their wholesale nursery, Tukai Exotics, produces these plants across seventy acres in five locations and supplies nurseries, landscape architects, hotels and corporate campuses.</p>
-        <p>This database began as the Tukai Exotics Plant CD-ROM in 2002 and now holds three times the plants and ten times the photographs.</p>
-        <a class="link" href="#/about">About the growers ${icon('arrow', 14)}</a>
-      </div>
+  ${natives.length ? `<section class="section collection" aria-labelledby="colTitle">
+    <div class="section__head"><div><h2 id="colTitle">${esc(col.title || 'Native to India')}</h2><p>${esc(col.intro || '')}</p></div><a class="link" href="${href({ sp: col.trait })}">All ${nf.format(PLANTS.filter(p => p.sp.includes(col.trait)).length)} native plants ${icon('arrow', 14)}</a></div>
+    <div class="grid grid--six">${natives.map(plantCard).join('')}</div>
+  </section>` : ''}
+
+  <section class="section trade" aria-labelledby="tradeTitle">
+    <div>
+      <h2 id="tradeTitle">Buying for a project, or visiting?</h2>
+      <p>Tukai Exotics sells wholesale to nurseries, garden shops, landscape architects, hotels, resorts and corporate clients. Retail visitors are welcome at The Enchanted Gardens every day, 9:30 am – 5:30 pm.</p>
+    </div>
+    <div class="trade__actions">
+      <a class="btn btn--primary" href="#/contact">${icon('pin', 14)}Where to find us</a>
+      <a class="btn" href="#/shop">${icon('bag', 14)}Accessories &amp; memberships</a>
     </div>
   </section></div>`;
 
-  // search inside act C
-  const f = app.querySelector('#heroSearch');
-  f.addEventListener('submit', e => { e.preventDefault(); go({ q: f.q.value }); });
+  app.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.jump)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })));
 
-  // plant picker
+  // plant picker: three explained results lead; the total supports them
   const sel = { sun: 'part', water: 'normal', space: 'pot', extra: '' };
-  const out = app.querySelector('#pickResult');
-  let shown = 0, raf = 0;
-  const tween = target => {
-    cancelAnimationFrame(raf);
-    const from = shown, t0 = performance.now(), numEl = out.querySelector('.result__num');
-    const step = now => {
-      const t = Math.min(1, (now - t0) / 420), e = 1 - (1 - t) ** 3;
-      shown = Math.round(from + (target - from) * e);
-      if (numEl) numEl.textContent = nf.format(shown);
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-  };
-  const renderPick = () => {
+  const out = app.querySelector('#pickResult'), live = app.querySelector('#pickLive');
+  const renderPick = announce => {
     app.querySelectorAll('.choice').forEach(b => b.setAttribute('aria-pressed', sel[b.dataset.g] === b.dataset.v));
     const q = pickerQuery(sel);
     const hits = matchQuery(q).sort((a, b) => (!!b.img - !!a.img) || (b.g.length - a.g.length));
-    out.innerHTML = `<span class="mono">Matching plants</span>
-      <span class="result__num num">${nf.format(shown)}</span>
-      <p class="result__sub">of ${nf.format(N)} records fit this spot.</p>
-      ${hits.length ? `<div class="result__grid">${hits.slice(0, 6).map(p => `<a href="#/plant/${p.id}"><span class="ri">${img(p.img, '')}</span><span>${esc(p.n)}</span></a>`).join('')}</div>
-        <a class="btn btn--primary btn--lg" href="${href(q)}">${icon('arrow', 14)}See all ${nf.format(hits.length)}</a>`
-      : `<div class="result__none" role="status">${icon('info', 12)} Nothing fits every answer. Try a different space or remove the extra.</div>`}`;
-    tween(hits.length);
+    out.innerHTML = hits.length ? `
+      <ul class="picks">${hits.slice(0, 3).map(p => `<li><a href="#/plant/${p.id}">
+        <span class="picks__img">${img(p.img, '')}</span>
+        <span class="picks__text"><span class="bot">${esc(p.n)}</span><span class="picks__common">${esc(commonOf(p))}</span><small>${esc(matchReason(p, q))}</small></span>
+      </a></li>`).join('')}</ul>
+      <p class="result__sub"><b class="num">${nf.format(hits.length)}</b> of ${nf.format(N)} records match these answers.</p>
+      <a class="btn btn--primary btn--lg" href="${href(q)}">${icon('arrow', 14)}See all ${nf.format(hits.length)}</a>`
+      : `<p class="result__none" role="status">${icon('info', 12)} No record matches every answer. Try a different space, or remove the extra.</p>`;
+    if (announce) live.textContent = `${nf.format(hits.length)} plants match`;
   };
   app.querySelectorAll('.choice').forEach(b => b.addEventListener('click', () => {
     const g = b.dataset.g;
-    sel[g] = g === 'extra' && sel[g] === b.dataset.v ? '' : b.dataset.v;   // the optional row can be toggled off
-    renderPick();
+    sel[g] = g === 'extra' && sel[g] === b.dataset.v ? '' : b.dataset.v;
+    renderPick(true);
   }));
-  renderPick();
-
+  renderPick(false);
   bindPins();
-  const countEl = app.querySelector('#filmCount');
-  // 3D film when WebGL is available and motion is welcome; the 2D film otherwise (or if three.js fails to load)
-  const filmEl = app.querySelector('#film');
-  const filmOpts = { wall, onCount: f2 => (countEl.textContent = nf.format(Math.round(1 + f2 * (N - 1)))) };
-  let stopFilm = () => {};
-  const webgl = (() => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } })();
-  if (!webgl || matchMedia('(prefers-reduced-motion: reduce)').matches) stopFilm = mountFilm(filmEl, filmOpts);
-  else import('./film3d.js?v=26').then(m => { if (filmEl.isConnected) stopFilm = m.mountFilm3d(filmEl, filmOpts); })
-    .catch(() => { if (filmEl.isConnected) stopFilm = mountFilm(filmEl, filmOpts); });
-  const stopBento = fitBento(app.querySelector('#bento'));
-  teardown = () => { stopFilm(); stopBento(); cancelAnimationFrame(raf); };
-}
 
-// Show exactly as many category tiles as fill whole rows at the current column count.
-function fitBento(grid) {
-  const tiles = [...grid.children];
-  const fit = () => {
-    const n = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
-    const rows = n >= 6 ? 2 : n >= 4 ? 3 : 4;
-    const bigCells = n <= 2 ? 4 : 8, big = n <= 2 ? 1 : 2;   // large tiles are 2×2
-    const show = Math.min(tiles.length, big + Math.max(0, n * rows - bigCells));
-    tiles.forEach((t, i) => (t.hidden = i >= show));
+  if (!useFilm) { teardown = null; return; }
+  // 3D film: mounted on first scroll or when the browser is idle, so the photo and copy come first
+  const filmEl = app.querySelector('#film');
+  let stopFilm = () => {}, started = false, gone = false;
+  const countEl = filmEl.querySelector('#filmCount');
+  const opts = { wall: seeded(PLANTS.filter(p => p.g[0]?.t || p.img), 600, 7).map(p => p.g[0]?.t || p.img), onCount: f2 => (countEl.textContent = nf.format(Math.round(1 + f2 * (N - 1)))) };
+  const fallback = () => {
+    if (gone || !filmEl.isConnected) return;
+    filmEl.outerHTML = introMarkup(spec, N);
+    app.querySelectorAll('#intro [data-jump]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth' })));
   };
-  fit();
-  const ro = new ResizeObserver(fit); ro.observe(grid);
-  return () => ro.disconnect();
+  const start = () => {
+    if (started || gone) return; started = true;
+    removeEventListener('scroll', start);
+    import('./film3d.js?v=30').then(m => { if (!gone && filmEl.isConnected) stopFilm = m.mountFilm3d(filmEl, opts); }).catch(fallback);
+  };
+  addEventListener('scroll', start, { passive: true, once: true });
+  const idle = (window.requestIdleCallback || (f => setTimeout(f, 1200)))(start, { timeout: 2500 });
+  const f = filmEl.querySelector('#heroSearch');
+  f.addEventListener('submit', e => { e.preventDefault(); go({ q: f.q.value }); });
+  teardown = () => { gone = true; removeEventListener('scroll', start); (window.cancelIdleCallback || clearTimeout)(idle); stopFilm(); };
 }
 
 /* ---------- Categories ---------- */
@@ -624,54 +654,77 @@ function viewPlant(id) {
     return;
   }
   const shots = [{ t: p.img, f: p.img, cap: p.cap }, ...p.g.map(g => ({ t: g.t, f: g.f }))].filter(s => s.f);
-  const row = (ic, k, v, extra = '') => v && v.length ? `<div class="spec__row"><dt>${icon(ic, 13)}${k}</dt><dd>${extra}${esc(Array.isArray(v) ? v.join(', ') : v)}</dd></div>` : '';
   const lightLvl = Math.max(0, ...p.light.map(l => LIGHT_LEVEL[l] || 0));
   const waterLvl = Math.max(0, ...p.water.map(w => WATER_LEVEL[w] || 0));
-  const group = (label, rows) => rows.trim() ? `<div class="spec__group"><span class="label">${label}</span>${rows}</div>` : '';
-  const related = PLANTS.filter(x => x !== p && x.img && (x.n.split(' ')[0] === p.n.split(' ')[0] || (x.fam === p.fam && x.primary === p.primary))).slice(0, 10);
-  const fill = related.length < 6 ? seeded(PLANTS.filter(x => x !== p && x.img && x.primary === p.primary && !related.includes(x)), 10 - related.length, +p.id) : [];
+  const genus = p.n.split(' ')[0];
+  const sameGenus = PLANTS.filter(x => x !== p && x.img && x.n.split(' ')[0] === genus).slice(0, 10);
+  const related = sameGenus.length >= 3 ? sameGenus
+    : [...sameGenus, ...PLANTS.filter(x => x !== p && x.img && !sameGenus.includes(x) && x.fam === p.fam && x.primary === p.primary)].slice(0, 10);
+  const relTitle = sameGenus.length >= 3 ? `More ${genus}` : `Related in ${p.primary || 'the records'}`;
+  const relWhy = sameGenus.length >= 3 ? `${sameGenus.length === 10 ? 'Ten' : sameGenus.length} other ${genus} records.` : `${sameGenus.length ? `${genus} first, then` : 'Plants from'} the same family (${(p.fam || '').split(' or ')[0]}) and category.`;
   const inBag = CART.some(l => l.key === 'plant:' + p.id);
+  const ref = [p.fam && (p.fam.split(' or ')[0]), p.primary, `Record ${p.id}`].filter(Boolean).join(' · ');
+  const row = (k, v) => v && v.length ? `<tr><th scope="row">${k}</th><td>${esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>` : '';
 
-  app.innerHTML = `<div class="view-in">
+  app.innerHTML = `<div class="view-in plant">
   <nav class="crumbs" aria-label="Breadcrumb">
-    <a href="#/plants">${icon('list', 12)}Plant list</a><span aria-hidden="true">/</span>
+    <a href="#/plants">Plant list</a><span aria-hidden="true">/</span>
     ${p.primary ? `<a href="${href({ cat: p.primary })}">${esc(p.primary)}</a><span aria-hidden="true">/</span>` : ''}
     <span aria-current="page">${esc(p.n)}</span>
   </nav>
-  <div class="detail">
-    ${gallery(shots, commonOf(p) || p.n, p.cap || p.n)}
-    <div class="info">
-      <h1>${esc(p.n)}</h1>
-      ${p.c.length ? `<div class="common">${esc(p.c.join(' · '))}</div>` : ''}
-      ${p.r ? `<div class="regional">${icon('pin', 12)}${esc(p.r)}</div>` : ''}
-      <div class="actions">
-        ${pinBtn(p, true)}
-        <button type="button" class="btn ${inBag ? 'add is-added' : ''}" id="enquire">${icon(inBag ? 'check' : 'bag', 14)}<span>${inBag ? 'In bag for a quote' : 'Enquire to buy'}</span></button>
-        <button type="button" class="btn" id="copy">${icon('link', 14)}<span>Copy link</span></button>
-      </div>
-      <dl class="spec">
-        ${group('Conditions', row('sun', 'Light', p.light.map(l => l.replace(' growing', '')), lightLvl ? meter(lightLvl) : '') + row('drop', 'Water', p.water, waterLvl ? meter(waterLvl) : ''))}
-        ${group('Size', row('height', 'Height', p.h) + row('spread', 'Spread', p.w) + row('form', 'Form', p.form) + row('clock', 'Life span', p.life))}
-        ${group('Appearance', row('flower', 'Grown for', p.for) + row('calendar', 'Flowering', p.months.length ? p.months.join(', ') : p.seasonL) + row('palette', 'Flower colour', p.flower) + row('leaf', 'Foliage', p.foliage))}
-        ${group('Classification', row('family', 'Family', p.fam) + `<div class="spec__row"><dt>${icon('tag', 13)}Categories</dt><dd class="tags">${p.cat.map(c => `<a class="tag" href="${href({ cat: c })}">${esc(c)}</a>`).join('')}</dd></div>` + row('box', 'Availability', p.avail))}
+  <div class="specimen">
+    <div class="specimen__media">
+      ${gallery(shots, commonOf(p) || p.n, p.cap || p.n)}
+      <button type="button" class="btn btn--ghost specimen__whole" id="whole" aria-pressed="false">${icon('camera', 14)}Show whole photo</button>
+    </div>
+    <div class="specimen__info">
+      <p class="specimen__ref">${esc(ref)}</p>
+      <h1 class="bot">${esc(p.n)}</h1>
+      ${p.c.length ? `<p class="specimen__common">${esc(p.c.join(' · '))}</p>` : ''}
+      ${p.r ? `<p class="specimen__regional">${esc(p.r)}</p>` : ''}
+      <dl class="care">
+        ${p.light.length ? `<div><dt>Light</dt><dd>${lightLvl ? meter(lightLvl) : ''}${esc(p.light.map(l => l.replace(' growing', '')).join(', '))}</dd></div>` : ''}
+        ${p.water.length ? `<div><dt>Water</dt><dd>${waterLvl ? meter(waterLvl) : ''}${esc(p.water.join(', '))}</dd></div>` : ''}
+        ${p.h ? `<div><dt>Mature height, as recorded</dt><dd>${esc(p.h)}${p.formL?.[0] ? `<small>${esc(p.form)}</small>` : ''}</dd></div>` : ''}
       </dl>
+      <div class="actions">
+        <button type="button" class="btn btn--primary btn--lg ${inBag ? 'is-added' : ''}" id="enquire">${icon(inBag ? 'check' : 'bag', 15)}<span>${inBag ? 'In bag for a quote' : 'Enquire to buy'}</span></button>
+        ${pinBtn(p, true)}
+        <button type="button" class="btn btn--ghost" id="copy">${icon('link', 14)}<span>Copy link</span></button>
+      </div>
+      ${p.avail ? `<p class="specimen__avail">Availability in India, as recorded: ${esc(p.avail)}</p>` : ''}
     </div>
   </div>
-  ${p.desc || p.tips || p.sp.length ? `<div class="longform">
-    <div>
-      ${p.desc ? `<section><h2>${icon('note', 16)}Description</h2>${para(p.desc)}</section>` : ''}
-      ${p.tips ? `<section><h2>${icon('sprout', 16)}Growing tips</h2>${para(p.tips)}</section>` : ''}
+
+  <div class="record">
+    <div class="record__main">
+      ${p.tips ? `<section class="growers"><h2>From the growers</h2>${para(p.tips)}</section>` : ''}
+      ${p.desc ? `<section><h2>About this plant</h2>${para(p.desc)}</section>` : ''}
+      ${p.pests ? `<section><h2>Insect pests</h2>${para(p.pests)}</section>` : ''}
+      ${p.dis ? `<section><h2>Diseases</h2>${para(p.dis)}</section>` : ''}
     </div>
-    <div>
-      ${p.sp.length ? `<div class="aside-block"><h2>Uses &amp; traits</h2><ul>${p.sp.map(s => `<li><a href="${href({ sp: s })}">${icon('tag', 12)}${esc(s)}</a></li>`).join('')}</ul></div>` : ''}
-      ${p.pests ? `<div class="aside-block"><h2>Insect pests</h2>${para(p.pests)}</div>` : ''}
-      ${p.dis ? `<div class="aside-block"><h2>Diseases</h2>${para(p.dis)}</div>` : ''}
-    </div>
-  </div>` : ''}
-  ${related.length + fill.length ? `<section class="section"><div class="section__head"><div><h2>Related plants</h2><p>Same genus first, then the same family and category.</p></div></div><div class="rail">${[...related, ...fill].map(plantCard).join('')}</div></section>` : ''}
+    <aside class="record__aside">
+      <h2>Full record</h2>
+      <table class="facts"><tbody>
+        ${row('Light', p.light)}${row('Water', p.water)}${row('Height', p.h)}${row('Spread', p.w)}${row('Form', p.form)}${row('Life span', p.life)}
+        ${row('Grown for', p.for)}${row('Flowering', p.months.length ? p.months.join(', ') : p.seasonL)}${row('Flower colour', p.flower)}${row('Foliage', p.foliage)}
+        ${row('Family', p.fam)}
+        <tr><th scope="row">Categories</th><td class="tags">${p.cat.map(c => `<a class="tag" href="${href({ cat: c })}">${esc(c)}</a>`).join('')}</td></tr>
+        ${row('Availability', p.avail)}
+      </tbody></table>
+      ${p.sp.length ? `<h3>Uses &amp; traits</h3><ul class="traits">${p.sp.map(s => `<li><a href="${href({ sp: s })}">${esc(s)}</a></li>`).join('')}</ul>` : ''}
+    </aside>
+  </div>
+  ${related.length ? `<section class="section"><div class="section__head"><div><h2>${esc(relTitle)}</h2><p>${esc(relWhy)}</p></div></div><div class="rail">${related.map(plantCard).join('')}</div></section>` : ''}
   </div>`;
 
   bindGallery(shots, p.n);
+  const whole = app.querySelector('#whole');
+  whole.addEventListener('click', () => {
+    const on = app.querySelector('.gallery__main').classList.toggle('is-whole');
+    whole.setAttribute('aria-pressed', on);
+    whole.lastChild.textContent = on ? 'Fill frame' : 'Show whole photo';
+  });
   app.querySelector('#copy').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(location.href); toast('Link copied'); }
     catch { toast('Couldn’t copy. Select the address bar and copy it manually.', { error: true }); }
@@ -679,8 +732,8 @@ function viewPlant(id) {
   app.querySelector('#enquire').addEventListener('click', e => {
     if (CART.some(l => l.key === 'plant:' + p.id)) { location.hash = '#/cart'; return; }
     addToCart('plant:' + p.id);
-    e.currentTarget.classList.add('add', 'is-added');
-    e.currentTarget.innerHTML = `${icon('check', 14)}<span>In bag for a quote</span>`;
+    e.currentTarget.classList.add('is-added');
+    e.currentTarget.innerHTML = `${icon('check', 15)}<span>In bag for a quote</span>`;
   });
   bindPins();
 }
@@ -742,6 +795,14 @@ function bindAdds() {
   }));
 }
 
+// Grouped by use, from the catalogue's own categories
+const SHOP_GROUPS = [
+  ['Pots & planters', 'Ceramic, cement and terracotta pots, planters and hanging baskets.', ['Pots', 'Planters', 'Hanging baskets']],
+  ['Supports & shade', 'Coir sticks for climbers, shade nets and weed mats for growing areas.', ['Coir sticks', 'Shade nets & weed mats']],
+  ['Garden & décor', 'Furniture, water features, stones and flower-arranging accessories.', ['Garden furniture', 'Decorative stones', 'Flower arranging']],
+  ['Memberships', 'Professional access to the full plant records.', ['Memberships']],
+];
+const slugify = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 function viewShop(params) {
   setNav('shop');
   const cat = params.get('cat') || '';
@@ -756,8 +817,12 @@ function viewShop(params) {
       <a href="#/shop" aria-current="${!cat}">${icon('store', 13)}All <small>${SHOP.length}</small></a>
       ${SHOP_CATS.map(c => `<a href="${href({ cat: c.name }, '#/shop')}" aria-current="${cat === c.name}">${icon(SHOP_ICON[c.name] || 'tag', 13)}${esc(c.name)} <small>${c.count}</small></a>`).join('')}
     </nav>
-    ${items.length ? `<div class="shop-grid">${items.map((s, i) => prodCard(s, !cat && i % 7 === 0)).join('')}</div>`
-      : `<div class="empty"><div class="empty__icon">${icon('store', 20)}</div><h2>Nothing in this category</h2><p><a class="link" href="#/shop">See all items ${icon('arrow', 14)}</a></p></div>`}
+    ${!items.length ? `<div class="empty"><div class="empty__icon">${icon('store', 20)}</div><h2>Nothing in this category</h2><p><a class="link" href="#/shop">See all items ${icon('arrow', 14)}</a></p></div>`
+      : cat ? `<div class="shop-grid">${items.map(s => prodCard(s)).join('')}</div>`
+      : SHOP_GROUPS.map(([title, note, cats]) => {
+          const list = SHOP.filter(s => cats.includes(s.cat));
+          return list.length ? `<section class="shop-group" aria-labelledby="g-${slugify(title)}"><div class="shop-group__head"><h2 id="g-${slugify(title)}">${title}</h2><p>${note}</p></div><div class="shop-grid">${list.map(s => prodCard(s)).join('')}</div></section>` : '';
+        }).join('')}
   </div>`;
   bindAdds();
 }
@@ -1132,13 +1197,22 @@ function viewSignup() {
   });
 }
 
-/* ---------- Header: sliding hover highlight ---------- */
-const links = document.getElementById('navLinks');
-const pill = links.querySelector('.nav__hover');
-links.querySelectorAll('a').forEach(a => a.addEventListener('pointerenter', () => {
-  pill.style.width = a.offsetWidth + 'px';
-  pill.style.transform = `translateX(${a.offsetLeft}px)`;
-}));
+/* ---------- Phone menu ---------- */
+const menuBtn = document.getElementById('menuBtn');
+const menu = document.getElementById('menu');
+function setMenu(open, focusSearch) {
+  menu.hidden = !open;
+  menuBtn.setAttribute('aria-expanded', open);
+  menuBtn.lastChild.textContent = open ? 'Close' : 'Menu';
+  if (open && focusSearch) menu.querySelector('input').focus();
+}
+menuBtn.addEventListener('click', () => setMenu(menu.hidden));
+menu.addEventListener('click', e => { if (e.target.closest('a')) setMenu(false); });
+document.getElementById('menuSearch').addEventListener('submit', e => { e.preventDefault(); setMenu(false); go({ q: e.target.q.value }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); } });
+// header height feeds the sticky hero stage
+const navEl = document.getElementById('nav');
+new ResizeObserver(() => document.documentElement.style.setProperty('--nav-h', navEl.querySelector('.nav__inner').offsetHeight + 'px')).observe(navEl);
 
 /* ---------- Nav search with live suggestions ---------- */
 const navForm = document.getElementById('navSearch');
@@ -1202,7 +1276,7 @@ function route() {
   else if (a === 'signup') viewSignup();
   else viewHome();
 }
-addEventListener('hashchange', () => { route(); scrollTo({ top: 0 }); app.focus({ preventScroll: true }); closeSuggest(); });
+addEventListener('hashchange', () => { setMenu(false); route(); scrollTo({ top: 0 }); app.focus({ preventScroll: true }); closeSuggest(); });
 
 hydrateIcons();
 app.innerHTML = '<p class="muted" style="padding:48px 0" role="status">Loading plant records…</p>';

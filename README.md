@@ -3,7 +3,7 @@
 A rebuild of indiaplants.com: 2,657 ornamental plant records from the growers at Tukai Exotics, Pune, with search,
 faceted filters, a plant picker, shop and quote requests, built from data extracted from the original site.
 
-Static HTML/CSS/JS with no build step. The home hero is a scroll-driven 3D film rendered with three.js, loaded from a CDN.
+Static HTML/CSS/JS with no build step. Type: Anek Latin (headings) and Mukta (text), both by Ek Type, Mumbai. The home hero is a scroll-driven 3D film rendered with three.js, loaded from a CDN.
 
 ## Layout
 
@@ -12,7 +12,8 @@ Static HTML/CSS/JS with no build step. The home hero is a scroll-driven 3D film 
 | `site/` | The website. **This is the deploy root.** |
 | `site/data/plants.json`, `shop.json` | Trimmed data the site reads |
 | `site/assets/hero/`, `site/assets/3d/` | Hero photos and 3D textures (generated for this site) |
-| `site/film3d.js` / `film.js` | 3D scroll film / 2D fallback |
+| `site/film3d.js` | 3D scroll film (desktop, loaded on first scroll/idle). Phones, reduced motion, no-WebGL and load failures get the static opening in `app.js` (`introMarkup`). Preview it with `?static` in the URL. |
+| `site/data/editorial.json` | Hand-curated home photos, focal points, captions (edited from the records) and category cover choices |
 | `site/crm.js` | Sign-up adapter (not connected yet, see below) |
 | `scripts/` | Parse, download and build scripts that rebuild the data |
 | `docs/` | Image briefs used to generate the hero and 3D assets |

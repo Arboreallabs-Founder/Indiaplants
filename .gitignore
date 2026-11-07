@@ -21,3 +21,6 @@ desktop.ini
 __pycache__/
 *.pyc
 .vercel
+
+# Local review harness (not deployed)
+_preview/
