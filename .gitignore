@@ -1,0 +1,23 @@
+# Scraped source pages: captured from a logged-in session, contain personal account details
+data/raw/
+
+# Full scraped dataset (the site ships its own trimmed copy in site/data/)
+data/plants.json
+data/images-failed.txt
+
+# Downloaded photos (~338 MB, ~28k files; too many for a Vercel deployment).
+# Re-create locally with: python -I scripts/download_images.py
+data/images/
+
+# Unused flytrap hero artwork (kept locally)
+site/assets/flytrap/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+.vercel
